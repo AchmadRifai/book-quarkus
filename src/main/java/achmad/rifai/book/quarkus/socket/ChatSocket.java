@@ -39,22 +39,21 @@ public class ChatSocket {
 	public void onOpen(Session session, @PathParam("dest") String username) {
 		map.put(username, session);
 		mapSubscribe.put(username, service.chatFor(username));
-		map.keySet().forEach(s->mapSubscribe.get(s)
-				.collect()
-				.asList()
-				.subscribe()
-				.with(l->map.get(s)
-						.getAsyncRemote()
-						.sendObject(l.stream()
-						.filter(Objects::nonNull)
-						.map(c-> c.getDest().equals(s) ? c.getTo() : c.getDest())
-						.distinct()
-						.collect(Collectors.joining("\n")), r->{
-					if (Objects.nonNull(r.getException())) {
-						Throwable e = r.getException();
-						logger.fatal(e.getMessage(), e);
-					}
-				})));
+		mapSubscribe.get(username).filter(Objects::nonNull)
+		.map(c-> c.getDest().equals(username) ? c.getTo() : c.getDest())
+		.collect()
+		.asList()
+		.subscribe()
+		.with(l->map.get(username)
+				.getAsyncRemote()
+				.sendObject(l.stream()
+				.distinct()
+				.collect(Collectors.joining("\n")), r->{
+			if (Objects.nonNull(r.getException())) {
+				Throwable e = r.getException();
+				logger.fatal(e.getMessage(), e);
+			}
+		}));
 	}
 
 	@OnClose

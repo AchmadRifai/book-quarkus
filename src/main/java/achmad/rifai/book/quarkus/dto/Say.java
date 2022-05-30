@@ -19,7 +19,8 @@ public class Say implements Serializable {
 	private static final long serialVersionUID = 2861945555449786819L;
 
 	private String to;
-	private String msg;
+	private String from;
+	private String writer;
 	private long time;
 
 }

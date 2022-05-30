@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import javax.inject.Inject;
 
+import org.jboss.logging.Logger;
 import org.junit.jupiter.api.Test;
 
 import com.mongodb.client.MongoClient;
@@ -20,9 +21,15 @@ class MongoDbTest {
 
 	@Inject ReactiveMongoClient reactiveMongoClient;
 
+	@Inject Logger logger;
+
 	@Test
 	void testConnectionDb() {
-		assertNotNull(mongoClient.getDatabase(BOOK));
+		try {
+			assertNotNull(mongoClient.getDatabase(BOOK));
+		} catch (Exception e) {
+			logger.fatal(e.getLocalizedMessage(), e);
+		}
 	}
 
 	@Test

@@ -13,6 +13,9 @@ import org.bson.BsonString;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.InsertOneResult;
 
@@ -30,6 +33,7 @@ import io.smallrye.mutiny.groups.UniCreate;
 class ChatServiceTests {
 
 	@InjectMock ReactiveMongoClient reactiveMongoClient;
+	@InjectMock MongoClient mongoClient;
 
 	@Inject ChatService service;
 
@@ -37,7 +41,8 @@ class ChatServiceTests {
 	void testCreate() {
 		when(reactiveMongoClient.getDatabase(DB).getCollection(DB, Chat.class).insertOne(chat))
 			.thenReturn(UniCreate.INSTANCE.item(InsertOneResult.acknowledged(new BsonString(DB))));
-		service.create(chat).onItem().invoke(i->assertNotNull(i));
+		when(mongoClient.getDatabase(DB).getCollection(DB, Chat.class).insertOne(chat)).thenReturn(InsertOneResult.acknowledged(new BsonString(DB)));
+		assertNotNull(service.create(chat));
 	}
 
 	@Test
@@ -50,7 +55,9 @@ class ChatServiceTests {
 	void testDelete() {
 		when(reactiveMongoClient.getDatabase(DB).getCollection(DB, Chat.class).deleteOne(BsonUtils.chatChangeDocument(chat)))
 			.thenReturn(UniCreate.INSTANCE.item(DeleteResult.acknowledged(1)));
-		service.delete(chat).invoke(d->assertEquals(1, d.getDeletedCount()));
+		when(mongoClient.getDatabase(DB).getCollection(DB, Chat.class).deleteMany(BsonUtils.chatChangeDocument(chat)))
+			.thenReturn(DeleteResult.acknowledged(1));
+		assertEquals(1, service.delete(chat).getDeletedCount());
 	}
 
 	@Test
@@ -74,6 +81,10 @@ class ChatServiceTests {
 		when(reactiveMongoClient.getDatabase(DB)).thenReturn(database);
 		ReactiveMongoCollection<Chat> collection = mock(ReactiveMongoCollection.class);
 		when(reactiveMongoClient.getDatabase(DB).getCollection(DB, Chat.class)).thenReturn(collection);
+		MongoDatabase database2 = mock(MongoDatabase.class);
+		when(mongoClient.getDatabase(DB)).thenReturn(database2);
+		MongoCollection<Chat> collection2 = mock(MongoCollection.class);
+		when(mongoClient.getDatabase(DB).getCollection(DB, Chat.class)).thenReturn(collection2);
 	}
 
 	private static final String DB = "chat";

@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import javax.inject.Inject;
+import javax.ws.rs.NotAllowedException;
 
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +35,8 @@ import achmad.rifai.book.quarkus.dto.DeletedBookRes;
 import achmad.rifai.book.quarkus.dto.ErrorDto;
 import achmad.rifai.book.quarkus.dto.ErrorRes;
 import achmad.rifai.book.quarkus.dto.MessageDto;
+import achmad.rifai.book.quarkus.exceptions.IsbnInvalidParamException;
+import achmad.rifai.book.quarkus.exceptions.WriterInvalidParamException;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.mockito.InjectMock;
 import io.restassured.response.Response;
@@ -139,6 +142,7 @@ class BookControllerTests {
 
 	@Test
 	void testPost_409Duplicate() throws JsonProcessingException {
+		logger.info("testPost_409Duplicate");
 		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find(documentId(book)).cursor().hasNext()).thenReturn(true);
 		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find(changedDocument(book)).cursor().hasNext()).thenReturn(true);
 		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find(changedDocument(book)).cursor().next()).thenReturn(book);
@@ -152,14 +156,17 @@ class BookControllerTests {
 
 	@Test
 	void testPost_409FailSave() throws JsonProcessingException {
-		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find(documentId(book)).cursor().hasNext()).thenReturn(true);
+		logger.info("testPost_409FailSave");
+		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find(documentId(book)).cursor().hasNext()).thenReturn(false);
 		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find(changedDocument(book)).cursor().hasNext()).thenReturn(false);
 		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find(changedDocument(book)).cursor().next()).thenReturn(book);
 		Response res = given().header("Content-Type", "application/json")
 				.body(objectMapper.writeValueAsString(book)).when().post(PATH);
 		logger.info(res.thenReturn().asString());
 		res.then()
-			.statusCode(409);
+			.statusCode(409)
+			.and()
+			.body(is(objectMapper.writeValueAsString(errorPost409FailSave)));
 	}
 
 	@Test
@@ -178,6 +185,7 @@ class BookControllerTests {
 
 	@Test
 	void testPut_400IsbnBlank() throws JsonProcessingException {
+		logger.info("testPut_400IsbnBlank");
 		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find(documentId(book)).cursor().hasNext()).thenReturn(true);
 		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find(documentId(book)).cursor().next()).thenReturn(book);
 		Response res = given().header("Content-Type", "application/json")
@@ -188,7 +196,7 @@ class BookControllerTests {
 						.build())).when().put(PATH);
 		logger.info(res.thenReturn().asString());
 		res.then()
-			.statusCode(400);
+			.statusCode(400).and().body(is(objectMapper.writeValueAsString(errorPost400Isbn)));
 	}
 
 	@Test
@@ -203,7 +211,7 @@ class BookControllerTests {
 						.build())).when().put(PATH);
 		logger.info(res.thenReturn().asString());
 		res.then()
-			.statusCode(400);
+		.statusCode(400).and().body(is(objectMapper.writeValueAsString(errorPost400Title)));
 	}
 
 	@Test
@@ -218,7 +226,7 @@ class BookControllerTests {
 						.build())).when().put(PATH);
 		logger.info(res.thenReturn().asString());
 		res.then()
-			.statusCode(400);
+			.statusCode(400).and().body(is(objectMapper.writeValueAsString(errorPost400Writer)));
 	}
 
 	@Test
@@ -228,7 +236,7 @@ class BookControllerTests {
 				.body(objectMapper.writeValueAsString(book)).when().put(PATH);
 		logger.info(res.thenReturn().asString());
 		res.then()
-			.statusCode(404);
+			.statusCode(404).and().body(is(objectMapper.writeValueAsString(errorPut404)));
 	}
 
 	@Test
@@ -241,6 +249,7 @@ class BookControllerTests {
 			.delete(PATH + "/" + book.getIsbn())
 			.then()
 			.statusCode(202)
+			.and()
 			.body(is(objectMapper.writeValueAsString(DeletedBookRes.builder().deleted(true).build())));
 	}
 
@@ -255,11 +264,48 @@ class BookControllerTests {
 				.body(objectMapper.writeValueAsString(book)).when().delete(PATH + "/" + book.getIsbn());
 		logger.info(res.thenReturn().asString());
 		res.then()
-			.statusCode(404);
+			.statusCode(404).and().body(is(objectMapper.writeValueAsString(ErrorRes.builder()
+					.error(ErrorDto.builder()
+							.timestamp(CURRENT_TIME)
+							.error("Book cannot deleted")
+							.status(404)
+							.exception(achmad.rifai.book.quarkus.exceptions.DataNotFoundException.class.getName())
+							.path(PATH + "/" + book.getIsbn())
+							.messages(messages.stream()
+									.filter(m->m.getReason().equalsIgnoreCase("notFound"))
+									.collect(Collectors.toList()))
+							.build())
+					.build())));
+	}
+
+	@Test
+	void testDelete_404Isbn() throws JsonProcessingException {
+		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find().iterator().hasNext()).thenReturn(false);
+		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find().iterator().next()).thenReturn(book);
+		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find(documentId(book)).cursor().hasNext())
+			.thenReturn(false);
+		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find(documentId(book)).cursor().next()).thenReturn(book);
+		Response res = given().header("Content-Type", "application/json")
+				.body(objectMapper.writeValueAsString(book)).when().delete(PATH + "/" + book.getIsbn());
+		logger.info(res.thenReturn().asString());
+		res.then()
+			.statusCode(404).and().body(is(objectMapper.writeValueAsString(ErrorRes.builder()
+					.error(ErrorDto.builder()
+							.timestamp(CURRENT_TIME)
+							.error("Book not found")
+							.status(404)
+							.exception(achmad.rifai.book.quarkus.exceptions.DataNotFoundException.class.getName())
+							.path(PATH + "/" + book.getIsbn())
+							.messages(messages.stream()
+									.filter(m->m.getReason().equalsIgnoreCase("notFound"))
+									.collect(Collectors.toList()))
+							.build())
+					.build())));
 	}
 
 	@Test
 	void testDelete_405() throws JsonProcessingException {
+		logger.info("testDelete_405");
 		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find().iterator().hasNext()).thenReturn(true).thenReturn(false);
 		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find().iterator().next()).thenReturn(book);
 		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find(documentId(book)).cursor().hasNext())
@@ -268,7 +314,18 @@ class BookControllerTests {
 				.body(objectMapper.writeValueAsString(book)).when().delete(PATH + "/ ");
 		logger.info(res.thenReturn().asString());
 		res.then()
-			.statusCode(405);
+			.statusCode(405).and().body(is(objectMapper.writeValueAsString(ErrorRes.builder()
+					.error(ErrorDto.builder()
+							.timestamp(CURRENT_TIME)
+							.status(405)
+							.error("HTTP 405 Method Not Allowed")
+							.exception(NotAllowedException.class.getName())
+							.messages(messages.stream()
+									.filter(m->m.getReason().equalsIgnoreCase("notAllowed"))
+									.collect(Collectors.toList()))
+							.path(PATH + "/")
+							.build())
+					.build())));
 	}
 
 	@Test
@@ -281,7 +338,18 @@ class BookControllerTests {
 				.body(objectMapper.writeValueAsString(book)).when().delete(PATH + "/" + book.getIsbn());
 		logger.info(res.thenReturn().asString());
 		res.then()
-			.statusCode(409);
+			.statusCode(409).and().body(is(objectMapper.writeValueAsString(ErrorRes.builder()
+					.error(ErrorDto.builder()
+							.timestamp(CURRENT_TIME)
+							.error("Book is failed to delete")
+							.status(409)
+							.exception(achmad.rifai.book.quarkus.exceptions.DuplicateDataException.class.getName())
+							.path(PATH + "/" + book.getIsbn())
+							.messages(messages.stream()
+									.filter(m->m.getReason().equalsIgnoreCase("conflict"))
+									.collect(Collectors.toList()))
+							.build())
+					.build())));
 	}
 
 	@Test
@@ -302,6 +370,7 @@ class BookControllerTests {
 
 	@Test
 	void testIsbn_400() throws JsonProcessingException {
+		logger.info("testIsbn_400");
 		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find(documentId(book)).cursor().hasNext()).thenReturn(false);
 		Response res = given().when()
 				.header("Content-Type", "application/json")
@@ -309,7 +378,18 @@ class BookControllerTests {
 				.when()
 				.post(PATH + "/isbn");
 		logger.info(res.thenReturn().asString());
-		res.then().statusCode(400);
+		res.then().statusCode(400).and().body(is(objectMapper.writeValueAsString(ErrorRes.builder()
+				.error(ErrorDto.builder()
+						.timestamp(CURRENT_TIME)
+						.error("ISBN must be not blank")
+						.status(400)
+						.exception(IsbnInvalidParamException.class.getName())
+						.path(PATH + "/isbn")
+						.messages(messages.stream()
+								.filter(m->m.getReason().startsWith("Isbn"))
+								.collect(Collectors.toList()))
+						.build())
+				.build())));
 	}
 
 	@Test
@@ -321,7 +401,18 @@ class BookControllerTests {
 				.when()
 				.post(PATH + "/isbn");
 		logger.info(res.thenReturn().asString());
-		res.then().statusCode(404);
+		res.then().statusCode(404).and().body(is(objectMapper.writeValueAsString(ErrorRes.builder()
+				.error(ErrorDto.builder()
+						.timestamp(CURRENT_TIME)
+						.error("Book not found")
+						.status(404)
+						.exception(achmad.rifai.book.quarkus.exceptions.DataNotFoundException.class.getName())
+						.path(PATH + "/isbn")
+						.messages(messages.stream()
+								.filter(m->m.getReason().equalsIgnoreCase("notFound"))
+								.collect(Collectors.toList()))
+						.build())
+				.build())));
 	}
 
 	@Test
@@ -342,6 +433,7 @@ class BookControllerTests {
 
 	@Test
 	void testWriter_400() throws JsonProcessingException {
+		logger.info("testWriter_400");
 		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find(documentWriter(writerReq)).cursor().next()).thenReturn(book);
 		when(mongoClient.getDatabase(DB).getCollection(DB, Book.class).find(documentWriter(writerReq)).cursor().hasNext())
 			.thenReturn(true).thenReturn(false);
@@ -350,8 +442,21 @@ class BookControllerTests {
 				.body(objectMapper.writeValueAsString(BookWriterReq.builder().writer(BLANK).build()))
 				.when()
 				.post(PATH + "/writer");
+		String json = objectMapper.writeValueAsString(ErrorRes.builder()
+				.error(ErrorDto.builder()
+						.timestamp(CURRENT_TIME)
+						.error("must not be blank")
+						.status(400)
+						.exception(WriterInvalidParamException.class.getName())
+						.path(PATH + "/writer")
+						.messages(messages.stream()
+								.filter(m->m.getReason().startsWith("Writer"))
+								.collect(Collectors.toList()))
+						.build())
+				.build());
 		logger.info(res.thenReturn().asString());
-		res.then().statusCode(400);
+		logger.info(json);
+		res.then().statusCode(400).and().body(is(json));
 	}
 
 	@Test
@@ -363,7 +468,19 @@ class BookControllerTests {
 				.when()
 				.post(PATH + "/writer");
 		logger.info(res.thenReturn().asString());
-		res.then().statusCode(404);
+		res.then().statusCode(404)
+		.and().body(is(objectMapper.writeValueAsString(ErrorRes.builder()
+				.error(ErrorDto.builder()
+						.timestamp(CURRENT_TIME)
+						.error(String.format("Writer %s don't have any book", writerReq.getWriter()))
+						.status(404)
+						.exception(achmad.rifai.book.quarkus.exceptions.DataNotFoundException.class.getName())
+						.path(PATH + "/writer")
+						.messages(messages.stream()
+								.filter(m->m.getReason().equalsIgnoreCase("notFound"))
+								.collect(Collectors.toList()))
+						.build())
+				.build())));
 	}
 
 	@SuppressWarnings("unchecked")
@@ -420,6 +537,10 @@ class BookControllerTests {
 			.reason("ISBN :\" \", Writer :\"Byasa\", title : \"Mahabarata\"").build(),
 			MessageDto.builder().message("Title must not be blank")
 			.reason("ISBN :\"978-161-729-045-9\", Writer :\"Byasa\", title : \" \"").build(),
+			MessageDto.builder().message("must not be blank")
+			.reason("Writer : \" \"").build(),
+			MessageDto.builder().message("ISBN must be not blank")
+			.reason("Isbn : \" \"").build(),
 			MessageDto.builder().message("writer must not be blank")
 			.reason("ISBN :\"978-161-729-045-9\", Writer :\" \", title : \"Mahabarata\"").build());
 
@@ -427,6 +548,19 @@ class BookControllerTests {
 			.error(ErrorDto.builder()
 					.timestamp(CURRENT_TIME)
 					.error("Books not found")
+					.status(404)
+					.exception(achmad.rifai.book.quarkus.exceptions.DataNotFoundException.class.getName())
+					.path(PATH)
+					.messages(messages.stream()
+							.filter(m->m.getReason().equalsIgnoreCase("notFound"))
+							.collect(Collectors.toList()))
+					.build())
+			.build();
+
+	private final ErrorRes errorPut404 = ErrorRes.builder()
+			.error(ErrorDto.builder()
+					.timestamp(CURRENT_TIME)
+					.error("Book not found")
 					.status(404)
 					.exception(achmad.rifai.book.quarkus.exceptions.DataNotFoundException.class.getName())
 					.path(PATH)
@@ -445,6 +579,7 @@ class BookControllerTests {
 					.path(PATH)
 					.messages(messages.stream()
 							.filter(m->m.getMessage().contains("ISBN"))
+							.limit(1)
 							.collect(Collectors.toList()))
 					.build())
 			.build();
